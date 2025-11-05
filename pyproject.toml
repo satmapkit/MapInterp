@@ -1,0 +1,6 @@
+[project]
+name = "map-interp"
+version = "1.0.0"
+dependencies = [
+    "OceanDB @ file:///home/rowedaniel/work/nwra/OceanDB"
+]

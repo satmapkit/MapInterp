@@ -1,0 +1,9 @@
+.DS_Store
+*.asv
+config.yaml
+__pycache__/
+*.pyc
+*.html
+*.nc
+*.png
+build
