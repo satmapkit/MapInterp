@@ -1,0 +1,21 @@
+networks:
+  ocean_network:
+    name: ocean_network
+    external: true
+
+
+services:
+  map_interp:
+    image: ocean_db_interp:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../OceanDB/OceanDB:/app/OceanDB
+      - ./src:/app/src
+      - ./test.py:/app/test.py
+
+#      - ./OceanDB:/app/OceanDB
+#      - ./data/copernicus:/app/data
+#      - ./config.yaml:/app/config.yaml
+    networks:
+      - ocean_network
