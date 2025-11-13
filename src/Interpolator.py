@@ -1,14 +1,44 @@
 from abc import ABC, abstractmethod
-from OceanDB.AlongTrack import AlongTrack
+from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 from datetime import datetime
 from typing import Any
 
+from OceanDB.AlongTrack import AlongTrack, SLA_Geographic, SLA_Projected
+
+class SLA_Geographic:
+    """
+    Make SLA data type explict
+    longitude,
+     latitude,
+	 sla_filtered,
+	 EXTRACT(EPOCH FROM ({central_date_time} - date_time)) AS time_difference_secs
+
+    """
+    latitude: npt.NDArray
+    longitude: npt.NDArray
+    sla_filtered: npt.NDArray
+    delta_t: npt.NDArray
+
+@dataclass
+class GeographicPoint:
+    latitude: float
+    longitude: float
+    datetime: datetime
+
+@dataclass
+class ProjectedPoint(GeographicPoint):
+    x: float
+    y: float
+
 
 class Interpolator(ABC):
     @abstractmethod
-    def interp(self, data: dict[str, npt.NDArray[np.float64]]) -> np.float64: ...
+    def interp(self, data: SLA_Geographic, point: GeographicPoint) -> np.float64|float:
+        """
+        Interpolate to point, given SLA data
+        """
 
 
 class NearestNeighborInterpolator(Interpolator):
@@ -16,8 +46,8 @@ class NearestNeighborInterpolator(Interpolator):
     Base class for interpolation methods that use nearest neighbor(s)
     """
 
-    def interp(self, data):
-        return data["sla_filtered"][0]
+    def interp(self, data, point):
+        return data.sla_filtered[0]
 
 
 class GeographicWindowInterpolator(Interpolator, ABC):
@@ -32,100 +62,99 @@ class ProjectedWindowInterpolator(Interpolator, ABC):
     Abstract base class for interpolation methods that use windows of projected
     points (transverse Mercator by default).
     """
+    def interp(self, data: SLA_Projected, point: ProjectedPoint):
+        ...
+
+
+class GeographicGaussianKernelInterpolator(GeographicWindowInterpolator):
+    def __init__(self, sigma: float, earth_radius = 6.357 * 10**6):
+        """
+        Interpolation method using a gaussian spreading kernel
+
+        sigma: spreading distance, in meters
+        earth_radius: Earth's radius, in meters
+        """
+
+        self.sigma = sigma
+        self.earth_radius = earth_radius
+
+    def distance(self,
+                 lats: npt.NDArray[np.floating],
+                 lons: npt.NDArray[np.floating],
+                 ref_lat: float,
+                 ref_lon: float) -> npt.NDArray[np.floating]:
+        """
+        Finds the great-circle distance from each point in points to the reference point ref_point,
+        approximating the earth as a sphere
+
+        lats: n-array of latitudes
+        lons: n-array of longitudes
+        ref_point: single reference point (lat, lon)
+        """
+
+        # convert from degrees to rad
+        lats = lats * np.pi / 180
+        lons = lons * np.pi / 180
+        ref_lat = ref_lat * np.pi / 180
+        ref_lon = ref_lon * np.pi / 180
+
+        return np.arccos(np.sin(lats) * np.sin(ref_lat) +
+                         np.cos(lats) * np.cos(ref_lat) * np.cos(lons - ref_lon)
+                         ) * self.earth_radius
+
+    def gaussian(self, x2: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        """
+        Return the gaussian kernal function evaluated at given distances.
+        x2: Square distances from center
+        """
+        return np.exp(-x2 / (2  * self.sigma * self.sigma)) / (self.sigma * np.sqrt(2 * np.pi))
+
+    def interp(self, data, point):
+        x2 = self.distance(data.latitude, data.longitude, point.latitude, point.longitude) ** 2
+        weights = self.gaussian(x2)
+        print(weights.sum())
+        weights /= weights.sum() # normalize
+        return np.dot(data.sla_filtered, weights)
 
 
 def interpolate_using_atdb(
-    lat: npt.NDArray[np.floating[Any]],
-    lon: npt.NDArray[np.floating[Any]],
-    date: datetime,
+    lats: npt.NDArray[np.floating[Any]],
+    lons: npt.NDArray[np.floating[Any]],
+    dates: list[datetime]|datetime,
     interpolator: Interpolator,
     atdb: AlongTrack,
-    distance: float | npt.NDArray[np.float64] = 500000,
+    distances: float | npt.NDArray[np.float64] = 500000,
     missions: list[str] | None = None,
 ):
 
     # initialize output array
-    sla = np.empty_like(lat)
+    sla = np.empty_like(lats)
     # any requested points not on the ocean will be filled with NaN.
     sla[:] = np.nan
 
     # restrict to only ocean points
-    basin_mask = atdb.basin_mask(lat, lon)
+    basin_mask = atdb.basin_mask(lats, lons)
     ocean_indices = (basin_mask > 0) & (basin_mask < 1000)
-    lat_ocean = lat[ocean_indices]
-    lon_ocean = lon[ocean_indices]
+    lat_ocean = lats[ocean_indices]
+    lon_ocean = lons[ocean_indices]
     sla_ocean = sla[ocean_indices]
 
+    if isinstance(dates, datetime):
+        dates = [dates] * lat_ocean.size
+    # print(len(dates), lat_ocean.shape)
+
     if isinstance(interpolator, NearestNeighborInterpolator):
-        for i, data in enumerate(
-            atdb.geographic_nearest_neighbors(
-                lat_ocean, lon_ocean, date, missions=missions
-            )
-        ):
-            sla_ocean[i] = interpolator.interp(data)
-    if isinstance(interpolator, GeographicWindowInterpolator):
-        for i, data in enumerate(
-            atdb.geographic_points_in_spatialtemporal_windows(
-                lat_ocean, lon_ocean, date, distance=distance, missions=missions
-            )
-        ):
-            sla_ocean[i] = interpolator.interp(data)
+        for i, (data, lat_point, lon_point, date) in enumerate(
+            zip(atdb.geographic_nearest_neighbors(lat_ocean, lon_ocean, dates, missions=missions),
+                lat_ocean, lon_ocean, dates
+                )):
+            sla_ocean[i] = interpolator.interp(data, GeographicPoint(lat_point, lon_point, date))
+    elif isinstance(interpolator, GeographicWindowInterpolator):
+        for i, (data, lat_point, lon_point, date) in enumerate(
+            zip(atdb.geographic_points_in_spatialtemporal_windows(lat_ocean, lon_ocean, dates, distances=distances, missions=missions),
+                lat_ocean, lon_ocean, dates
+                )):
+            sla_ocean[i] = interpolator.interp(data, GeographicPoint(lat_point, lon_point, date))
     sla[ocean_indices] = sla_ocean
     return sla
 
-
-
-
-# class GaussianKernel(ProjectedWindowInterpolator):
-#     def __init__(self, spread_distance):
-#         self.spread_distance = spread_distance
-#
-#     def area_element(self, latitude: float) -> float:
-#         return (50e3 + 250e3 * (900 / (latitude**2 + 900))) / 3.34
-#
-#     def kernel(self, x2, sigma):
-#         return np.exp(-0.5 * x2 / (sigma * sigma)) / (sigma * np.sqrt(2 * np.pi))
-#
-#     def interp(args):
-#         gaussian_kernel_smoother(x2, data["sla_filtered"], L[i])
-
-
-# class AlongTrackInterp(AlongTrack):
-#     """ """
-#
-#     def interp(self, grid: Grid, interp_method: str): ...
-#
-#     def interp(self, lat: float, lon: float, time: DateTime, interp_method: str): ...
-#
-#     def interpn(self, lats: np.ndarray, lon: np.ndarray, interp_method: str): ...
-#
-#     def interp_grid(self, min_lat, max_lat, min_lon, max_lon, interp_method: str): ...
-#
-#
-# lat, lon, time = grid(args)
-# interp_points = atdb.interp(lat, lon, time)
-# dataframe = pd.DataFrame({"lat": lat, "lon": lon, "time": time, "points": inter_points})
-# dataframe.save_netcdf("filename")
-# # file has 4 columns
-#
-# g = Grid(args)
-# g.interp()
-# g.save_min_size_netcdf("filename")
-# # file has 1 column, but with args as metadata
-#
-#
-# # use cases:
-# # points along ship trajectories
-# # points along float trajectories
-# # grid in lat/lon (geographic coords)
-# # grid in projected coords
-#
-#
-# ship_trajectory = pd.from_csv("trajectory.csv")
-# atdb.interp(ship_trajectory, "nearest_neighbor")
-#
-# grid = make_me_a_grid()
-# atdb.interp(grid, "nearest_neighbor")
-#
-# atdb = AlongTrackInterp()
-# grid_data = atdb.interp_grid(-60, 60, 40, 50, "nearest_neighbor")
