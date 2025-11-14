@@ -1,13 +1,12 @@
-from src.Interpolator import interpolate_using_atdb, NearestNeighborInterpolator
-from OceanDB.AlongTrack import AlongTrack
+from src.Interpolator import interpolate_using_atdb, NearestNeighborInterpolator, GeographicGaussianKernelInterpolator, ProjectedGaussianKernelInterpolator
 
 import numpy as np
 from datetime import datetime
-import xarray as xr
 from matplotlib import colors
 import matplotlib.pyplot as plt
+import time
 
-date = datetime(year=2008, month=10, day=29, hour=3)
+date = datetime(year=2013, month=12, day=31, hour=23)
 
 # choose lat/lon grid values
 resolution = 2.5
@@ -15,27 +14,22 @@ lon_dim = np.arange(-180, 180 - resolution, resolution) + resolution / 2
 lat_dim = np.arange(-70, 70 - resolution, resolution) + resolution / 2
 lon, lat = np.meshgrid(lon_dim, lat_dim)
 
-# get sla
-print("setting up db")
-atdb = AlongTrack(config_dir="/home/rowedaniel/work/nwra/OceanDB/")
-print("setting up interpolator")
-interpolator = NearestNeighborInterpolator()
+interpolators = [
+        (NearestNeighborInterpolator(), "Nearest neighbor"),
+        (GeographicGaussianKernelInterpolator(50 * 10**3), "Geographic gaussian kernel"),
+        (ProjectedGaussianKernelInterpolator(50 * 10**3), "Projected gaussian kernel"),
+        ]
+for interp, title in interpolators:
+    print(f"doing the interpolation using {title.lower()}")
+    t1 = time.time()
+    sla = interpolate_using_atdb(lat, lon, date, interp)
+    print(f"finished interpolation. Took {time.time()-t1}s")
 
-print("doing the interpolation")
-sla = interpolate_using_atdb(lat, lon, date, interpolator, atdb)
+    # make a plot
 
-print("reformatting for graphing")
-sla_grid = sla.reshape(lat.shape)
-print('sla_grid.shape:', sla_grid.shape)
-print('lon.shape:', lon.shape)
-sla_map_nn = xr.DataArray(sla_grid,
-                          coords={'latitude': lat_dim, 'longitude': lon_dim},
-                          dims=["latitude", "longitude"])
-
-plt.figure()
-# ax = sla_map.plot.contourf(levels=100, norm=norm, cmap='RdBu_r')
-# plt.pcolormesh(lat, lon, sla_grid, cmap='RdBu_r')
-norm = colors.Normalize(vmin=-0.5, vmax=0.5)
-ax = sla_map_nn.plot.pcolormesh(norm=norm, cmap='RdBu_r')
-plt.title('Nearest neighbor map')
-plt.show()
+    norm = colors.Normalize(vmin=-0.5, vmax=0.5)
+    plt.figure()
+    plt.pcolormesh(lon, lat, sla, cmap='RdBu_r', norm=norm)
+    plt.title(f'{title}, resolution={resolution} degrees, {str(date)}')
+    filename = "/app/data/output_" + ''.join(title.lower().strip().split(' ')) + ".png"
+    plt.savefig(filename, dpi=400)

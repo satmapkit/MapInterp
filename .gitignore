@@ -6,4 +6,6 @@ __pycache__/
 *.html
 *.nc
 *.png
-build
+
+.idea/
+*.egg-info
