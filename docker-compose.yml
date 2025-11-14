@@ -11,8 +11,10 @@ services:
     tty: true
     volumes:
       - ../OceanDB/OceanDB:/app/OceanDB
+      - ../OceanDB/config.yaml:/app/config.yaml
       - ./src:/app/src
       - ./test.py:/app/test.py
+      - ./data:/app/data
 
 #      - ./OceanDB:/app/OceanDB
 #      - ./data/copernicus:/app/data

@@ -1,5 +1,4 @@
-from src.Interpolator import interpolate_using_atdb, NearestNeighborInterpolator, GeographicGaussianKernelInterpolator
-from OceanDB.AlongTrack import AlongTrack
+from src.Interpolator import interpolate_using_atdb, NearestNeighborInterpolator, GeographicGaussianKernelInterpolator, ProjectedGaussianKernelInterpolator
 
 import numpy as np
 from datetime import datetime
@@ -15,46 +14,22 @@ lon_dim = np.arange(-180, 180 - resolution, resolution) + resolution / 2
 lat_dim = np.arange(-70, 70 - resolution, resolution) + resolution / 2
 lon, lat = np.meshgrid(lon_dim, lat_dim)
 
-print("setting up db")
-atdb = AlongTrack()
+interpolators = [
+        (NearestNeighborInterpolator(), "Nearest neighbor"),
+        (GeographicGaussianKernelInterpolator(50 * 10**3), "Geographic gaussian kernel"),
+        (ProjectedGaussianKernelInterpolator(50 * 10**3), "Projected gaussian kernel"),
+        ]
+for interp, title in interpolators:
+    print(f"doing the interpolation using {title.lower()}")
+    t1 = time.time()
+    sla = interpolate_using_atdb(lat, lon, date, interp)
+    print(f"finished interpolation. Took {time.time()-t1}s")
 
+    # make a plot
 
-print("setting up interpolators")
-nnInterp = NearestNeighborInterpolator()
-gaInterp = GeographicGaussianKernelInterpolator(200 * 10**3)
-
-print("doing the interpolation")
-
-print("starting nearest neighbor")
-t1 = time.time()
-sla_nn = interpolate_using_atdb(lat, lon, date, nnInterp, atdb)
-print(f"finished nearest neighbor. Took {time.time()-t1} seconds")
-
-print("starting gaussian")
-t1 = time.time()
-sla_ga = interpolate_using_atdb(lat, lon, date, gaInterp, atdb)
-print(f"finished gaussian. Took {time.time()-t1} seconds")
-
-print("reformatting for graphing")
-sla_nn_grid = sla_nn.reshape(lat.shape)
-sla_ga_grid = sla_ga.reshape(lat.shape)
-
-norm = colors.Normalize(vmin=-0.5, vmax=0.5)
-
-# nearest neighbor
-plt.figure()
-plt.pcolormesh(lon, lat, sla_nn_grid, cmap='RdBu_r', norm=norm)
-plt.title('Nearest neighbor map')
-plt.savefig("/app/data/output_nn.png")
-
-# geographic gaussian
-plt.figure()
-plt.pcolormesh(lon, lat, sla_ga_grid, cmap='RdBu_r', norm=norm)
-plt.title('Geographic gaussian map')
-plt.savefig("/app/data/output_ga.png")
-
-# diff
-plt.figure()
-plt.pcolormesh(lon, lat, sla_nn_grid - sla_ga_grid, cmap='RdBu_r', norm=norm)
-plt.title('difference nn - ga')
-plt.savefig("/app/data/output_diff.png")
+    norm = colors.Normalize(vmin=-0.5, vmax=0.5)
+    plt.figure()
+    plt.pcolormesh(lon, lat, sla, cmap='RdBu_r', norm=norm)
+    plt.title(f'{title}, resolution={resolution} degrees, {str(date)}')
+    filename = "/app/data/output_" + ''.join(title.lower().strip().split(' ')) + ".png"
+    plt.savefig(filename, dpi=400)
