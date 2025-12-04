@@ -12,15 +12,30 @@ root-dir/
 ├─ MapInterp/
 
 ```
-
-From here, docker can be used to start an interactive shell, via
+### Login information
+You will need a .env file to connect to the OceanDB database.
+You can copy .env.example to .env, and modify as necessary.
 ```sh
-make shell
+cp .env.example .env
 ```
+
+### Python dependencies
+If you wish to use a virtual environment, you can start one with
+```sh
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Install the python dependencies with
+```sh
+pip install .
+```
+(Note that if you are NOT using a virtual environment, you may have to use `python -m pip` instead of `pip`.)
 
 ## Running
 An example can be found in [test.py](./test.py)
-Run from the docker container via
+Run via
 ```sh
 python test.py
 ```
+Note that this test relies on the database being accessible with permissions in .env.
