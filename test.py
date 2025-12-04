@@ -9,15 +9,15 @@ import time
 date = datetime(year=2013, month=12, day=31, hour=23)
 
 # choose lat/lon grid values
-resolution = 2.5
+resolution = 5
 lon_dim = np.arange(-180, 180 - resolution, resolution) + resolution / 2
 lat_dim = np.arange(-70, 70 - resolution, resolution) + resolution / 2
 lon, lat = np.meshgrid(lon_dim, lat_dim)
 
 interpolators = [
         (NearestNeighborInterpolator(), "Nearest neighbor"),
-        (GeographicGaussianKernelInterpolator(50 * 10**3), "Geographic gaussian kernel"),
-        (ProjectedGaussianKernelInterpolator(50 * 10**3), "Projected gaussian kernel"),
+        (GeographicGaussianKernelInterpolator(100 * 10**3), "Geographic gaussian kernel"),
+        (ProjectedGaussianKernelInterpolator(100 * 10**3), "Projected gaussian kernel"),
         ]
 for interp, title in interpolators:
     print(f"doing the interpolation using {title.lower()}")
