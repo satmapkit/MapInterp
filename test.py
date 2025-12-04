@@ -31,5 +31,6 @@ for interp, title in interpolators:
     plt.figure()
     plt.pcolormesh(lon, lat, sla, cmap='RdBu_r', norm=norm)
     plt.title(f'{title}, resolution={resolution} degrees, {str(date)}')
-    filename = "/app/data/output_" + ''.join(title.lower().strip().split(' ')) + ".png"
+    filename = "figs/output_" + ''.join(title.lower().strip().split(' ')) + ".png"
     plt.savefig(filename, dpi=400)
+plt.show()
