@@ -19,17 +19,30 @@ interpolators = [
         (GeographicGaussianKernelInterpolator(100 * 10**3), "Geographic gaussian kernel"),
         (ProjectedGaussianKernelInterpolator(100 * 10**3), "Projected gaussian kernel"),
         ]
+all_sla = []
 for interp, title in interpolators:
     print(f"doing the interpolation using {title.lower()}")
     t1 = time.time()
-    sla = interpolate_using_atdb(lat, lon, date, interp)
+    all_sla.append(interpolate_using_atdb(lat, lon, date, interp))
     print(f"finished interpolation. Took {time.time()-t1}s")
 
     # make a plot
 
-    norm = colors.Normalize(vmin=-0.5, vmax=0.5)
+norm = colors.Normalize(vmin=-0.5, vmax=0.5)
+for i,(sla, (_,title)) in enumerate(zip(all_sla, interpolators)):
     plt.figure()
     plt.pcolormesh(lon, lat, sla, cmap='RdBu_r', norm=norm)
-    plt.title(f'{title}, resolution={resolution} degrees, {str(date)}')
+    plt.title(f'{title}')
     filename = "/app/data/output_" + ''.join(title.lower().strip().split(' ')) + ".png"
     plt.savefig(filename, dpi=400)
+
+    for sla2, (_,title2) in zip(all_sla[i+1:], interpolators[i+1:]):
+        plt.figure()
+        plt.pcolormesh(lon, lat, sla-sla2, cmap='RdBu_r')
+        plt.title(f'{title}')
+        filename = "/app/data/output_" + \
+                   ''.join(title.lower().strip().split(' ')) + \
+                   "_minus_" + \
+                   ''.join(title2.lower().strip().split(' ')) + \
+                   ".png"
+        plt.savefig(filename, dpi=400)
