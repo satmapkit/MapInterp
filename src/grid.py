@@ -22,7 +22,7 @@ def geographic_grid_using_atdb(
     return lat_ocean, lon_ocean
 
 
-def save_netcdf_grid(
+def save_grid_to_netcdf(
     x: npt.NDArray[np.floating[Any]],
     y: npt.NDArray[np.floating[Any]],
     sla: npt.NDArray[np.floating[Any]],
