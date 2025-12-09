@@ -112,7 +112,6 @@ def interpolate_using_atdb(
 
     if isinstance(dates, datetime):
         dates = [dates] * lat_ocean.size
-    # print(len(dates), lat_ocean.shape)
 
     if isinstance(interpolator, NearestNeighborInterpolator):
         data = atdb.geographic_nearest_neighbors_dt(
@@ -147,7 +146,6 @@ def interpolate_using_atdb(
             nones += 1
         else:
             sla_ocean[i] = interpolator.interp(data, GeographicPoint(lat_point, lon_point, date))
-    print("got",nones,"nones")
 
     sla[ocean_indices] = sla_ocean
     return sla
