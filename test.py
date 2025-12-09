@@ -1,4 +1,5 @@
 from src.Interpolator import interpolate_using_atdb, NearestNeighborInterpolator, GeographicGaussianKernelInterpolator, ProjectedGaussianKernelInterpolator
+from src.grid import save_netcdf_grid
 
 import numpy as np
 from datetime import datetime
@@ -31,6 +32,7 @@ for interp, title in interpolators:
     plt.figure()
     plt.pcolormesh(lon, lat, sla, cmap='RdBu_r', norm=norm)
     plt.title(f'{title}, resolution={resolution} degrees, {str(date)}')
-    filename = "figs/output_" + ''.join(title.lower().strip().split(' ')) + ".png"
-    plt.savefig(filename, dpi=400)
+    filename = "figs/output_" + ''.join(title.lower().strip().split(' '))
+    plt.savefig(filename + ".png", dpi=400)
+    save_netcdf_grid(lat_dim, lon_dim, sla, filename + ".nc")
 plt.show()
