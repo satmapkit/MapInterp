@@ -1,5 +1,5 @@
 from src.Interpolator import interpolate_using_atdb, NearestNeighborInterpolator, GeographicGaussianKernelInterpolator, ProjectedGaussianKernelInterpolator
-from src.grid import save_grid_to_netcdf
+from src.Grid import InterpGrid
 
 import numpy as np
 from datetime import datetime
@@ -13,7 +13,7 @@ date = datetime(year=2013, month=12, day=31, hour=23)
 resolution = 2.5
 lon_dim = np.arange(-180, 180 - resolution, resolution) + resolution / 2
 lat_dim = np.arange(-70, 70 - resolution, resolution) + resolution / 2
-lon, lat = np.meshgrid(lon_dim, lat_dim)
+grid = InterpGrid(lat_dim, lon_dim, date, 'equirectangular')
 
 interpolators = [
         (NearestNeighborInterpolator(), "Nearest neighbor"),
@@ -23,16 +23,18 @@ interpolators = [
 for interp, title in interpolators:
     print(f"doing the interpolation using {title.lower()}")
     t1 = time.time()
-    sla = interpolate_using_atdb(lat, lon, date, interp)
+    sla_obj = interpolate_using_atdb(grid, interp)
     print(f"finished interpolation. Took {time.time()-t1}s")
 
     # make a plot
 
     norm = colors.Normalize(vmin=-0.5, vmax=0.5)
     plt.figure()
-    plt.pcolormesh(lon, lat, sla, cmap='RdBu_r', norm=norm)
+    plt.pcolormesh(sla_obj.queryPoints.y, sla_obj.queryPoints.x, sla_obj.sla, cmap='RdBu_r', norm=norm)
     plt.title(f'{title}, resolution={resolution} degrees, {str(date)}')
     filename = "figs/output_" + ''.join(title.lower().strip().split(' '))
     plt.savefig(filename + ".png", dpi=400)
-    save_grid_to_netcdf(lat_dim, lon_dim, sla, filename + ".nc")
+
+    # save to netcdf
+    sla_obj.to_netcdf(filename + ".nc")
 plt.show()
