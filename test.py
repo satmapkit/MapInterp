@@ -1,5 +1,10 @@
-from src.Interpolator import interpolate_using_atdb, NearestNeighborInterpolator, GeographicGaussianKernelInterpolator, ProjectedGaussianKernelInterpolator
-from src.Grid import InterpGrid
+from MapInterp.Interpolator import (
+    GeographicGaussianKernelInterpolator,
+    NearestNeighborInterpolator,
+    ProjectedGaussianKernelInterpolator,
+    interpolate_using_atdb,
+)
+from MapInterp.Grid import InterpGrid
 
 import numpy as np
 from datetime import datetime
