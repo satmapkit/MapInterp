@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Mapping, cast
 
-from OceanDB.AlongTrack import AlongTrack, SLA_Geographic, SLA_Projected
+from OceanDB.data_access.along_track import AlongTrack
+from OceanDB.utils.projections import latitude_longitude_to_spherical_transverse_mercator
 
 from .InterpQueryPoints import InterpQueryPoints
 from .InterpolatedPoints import InterpolatedPoints
@@ -26,9 +27,7 @@ class GeographicPoint:
 
 class Interpolator(ABC):
     @abstractmethod
-    def interp(
-        self, data: SLA_Geographic, point: GeographicPoint
-    ) -> np.float64 | float:
+    def interp(self, data: Mapping[Any, Any], point: GeographicPoint) -> np.float64 | float:
         """
         Interpolate to point, given SLA data
         """
@@ -40,7 +39,7 @@ class NearestNeighborInterpolator(Interpolator):
     """
 
     def interp(self, data, point):
-        return data.sla_filtered[0]
+        return data["sla_filtered"][0]
 
 
 class GeographicWindowInterpolator(Interpolator, ABC):
@@ -56,7 +55,11 @@ class ProjectedWindowInterpolator(Interpolator, ABC):
     points (transverse Mercator by default).
     """
 
-    def interp(self, data: SLA_Projected, point: GeographicPoint): ...
+    @abstractmethod
+    def interp(
+        self, data: Mapping[Any, Any], point: GeographicPoint
+    ) -> np.float64 | float:
+        raise NotImplementedError
 
 
 class GeographicGaussianKernelInterpolator(GeographicWindowInterpolator):
@@ -72,10 +75,10 @@ class GeographicGaussianKernelInterpolator(GeographicWindowInterpolator):
         self.needs_distance = True
 
     def interp(self, data, point):
-        r = data.distance
+        r = data["distance"]
         weights = np.exp(-1 / 2 * (r / self.length_scale) ** 2)
         weights /= weights.sum()  # normalize
-        return np.dot(data.sla_filtered, weights)
+        return np.dot(data["sla_filtered"], weights)
 
 
 class ProjectedGaussianKernelInterpolator(ProjectedWindowInterpolator):
@@ -91,14 +94,20 @@ class ProjectedGaussianKernelInterpolator(ProjectedWindowInterpolator):
         self.needs_distance = True
 
     def interp(self, data, point):
-        x2 = data.delta_x**2 + data.delta_y**2
+        x, y = latitude_longitude_to_spherical_transverse_mercator(
+            data["latitude"], data["longitude"], point.longitude
+        )
+        x0, y0 = latitude_longitude_to_spherical_transverse_mercator(
+            point.latitude, point.longitude, point.longitude
+        )
+        x2 = (x - x0) ** 2 + (y - y0) ** 2
         weights = np.exp(-1 / 2 * x2 / self.length_scale**2)
         if weights.sum() == 0 or np.isnan(weights.sum()):
             print("got none or nan")
             print(data)
             print(weights)
         weights /= weights.sum()  # normalize
-        return np.dot(data.sla_filtered, weights)
+        return np.dot(data["sla_filtered"], weights)
 
 
 def interpolate_using_atdb(
@@ -109,6 +118,23 @@ def interpolate_using_atdb(
     missions: list[str] | None = None,
 ) -> InterpolatedPoints:
 
+    def query_fields() -> list[Any]:
+        if isinstance(interpolator, NearestNeighborInterpolator):
+            return ["sla_filtered", "distance"]
+        if isinstance(interpolator, GeographicWindowInterpolator):
+            fields = ["sla_filtered"]
+            if getattr(interpolator, "needs_distance", False):
+                fields.append("distance")
+            return fields
+        if isinstance(interpolator, ProjectedWindowInterpolator):
+            return ["latitude", "longitude", "sla_filtered"]
+        raise ValueError("Unrecognized Interpolator type")
+
+    def point_distance(i: int) -> float:
+        if not isinstance(distances, np.ndarray):
+            return float(cast(Any, distances))
+        return float(distances.astype(float, copy=False).reshape(-1)[i])
+
     # initialize output array
     sla = np.empty_like(queryPoints.lat)
     # any requested points not on the ocean will be filled with NaN.
@@ -117,40 +143,40 @@ def interpolate_using_atdb(
     # restrict to only ocean points
     basin_mask = atdb.basin_mask(queryPoints.lat, queryPoints.lon)
     ocean_indices = (basin_mask > 0) & (basin_mask < 1000)
-    lat_ocean = queryPoints.lat[ocean_indices]
-    lon_ocean = queryPoints.lon[ocean_indices]
     sla_ocean = sla[ocean_indices]
+    ocean_flat_indices = np.flatnonzero(ocean_indices.reshape(-1))
+    fields = query_fields()
+    query_missions = cast(Any, missions if missions is not None else atdb.all_missions)
+    time_window = timedelta(days=10)
 
-    if isinstance(interpolator, NearestNeighborInterpolator):
-        data = atdb.geographic_nearest_neighbors_dt(
-            lat_ocean, lon_ocean, queryPoints.dates, missions=missions
-        )
-    elif isinstance(interpolator, GeographicWindowInterpolator):
-        data = atdb.geographic_points_in_r_dt(
-            lat_ocean,
-            lon_ocean,
-            queryPoints.dates,
-            distances=distances,
-            missions=missions,
-        )
-    elif isinstance(interpolator, ProjectedWindowInterpolator):
-        data = atdb.projected_points_in_r_dt(
-            lat_ocean,
-            lon_ocean,
-            queryPoints.dates,
-            distances=distances,
-            missions=missions,
-        )
-    else:
-        raise ValueError("Unrecognized Interpolator type")
+    for i, flat_index in enumerate(ocean_flat_indices):
+        point = GeographicPoint.from_query_points(queryPoints, flat_index)
 
-    nones = 0
-    for i, data in enumerate(data):
+        if isinstance(interpolator, NearestNeighborInterpolator):
+            data = atdb.geographic_nearest_neighbors(
+                fields=fields,
+                latitude=point.latitude,
+                longitude=point.longitude,
+                date=point.datetime,
+                time_window=time_window,
+                missions=query_missions,
+            )
+        elif isinstance(interpolator, GeographicWindowInterpolator | ProjectedWindowInterpolator):
+            data = atdb.geographic_point_in_r_dt(
+                fields=fields,
+                latitude=point.latitude,
+                longitude=point.longitude,
+                date=point.datetime,
+                radius=point_distance(flat_index),
+                time_window=time_window,
+                missions=query_missions,
+            )
+        else:
+            raise ValueError("Unrecognized Interpolator type")
+
         if data is None:
             sla_ocean[i] = np.nan
-            nones += 1
         else:
-            point = GeographicPoint.from_query_points(queryPoints, i)
             sla_ocean[i] = interpolator.interp(data, point)
 
     sla[ocean_indices] = sla_ocean

@@ -1,4 +1,4 @@
-from InterpQueryPoints import InterpQueryPoints
+from .InterpQueryPoints import InterpQueryPoints
 
 
 import numpy as np
