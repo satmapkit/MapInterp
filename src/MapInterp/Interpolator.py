@@ -1,104 +1,137 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import numpy as np
-import numpy.typing as npt
-from datetime import datetime, timedelta
-from typing import Any, Mapping, cast
+from datetime import timedelta, datetime
+from typing import Any, TypedDict, TypeVar, Literal, Mapping, Generic
 
-from OceanDB.data_access.along_track import AlongTrack
+from OceanDB.data_access.along_track import AlongTrack, along_track_fields, Mission
 from OceanDB.utils.projections import latitude_longitude_to_spherical_transverse_mercator
+from OceanDB.ocean_data.dataset import Dataset
 
-from .InterpQueryPoints import InterpQueryPoints
+from .InterpQueryPoints import InterpQueryPoints, InterpQueryPoint
 from .InterpolatedPoints import InterpolatedPoints
 
+class InterpArgs(TypedDict):
+    fields: list[along_track_fields]
 
-@dataclass
-class GeographicPoint:
-    latitude: float
-    longitude: float
-    datetime: datetime
+class NearestNeighborInterpArgs(InterpArgs):
+    time_window: timedelta
+    missions: list[Mission]
 
-    @classmethod
-    def from_query_points(cls, query_points: InterpQueryPoints, i: int):
-        return cls(
-            query_points.lat.item(i), query_points.lon.item(i), query_points.dates[i]
-        )
+class GeographicWindowArgs(InterpArgs):
+    radius: float
+    time_window: timedelta
+    missions: list[Mission]
 
-
-class Interpolator(ABC):
+K = TypeVar('K', bound=str)
+V = TypeVar('V', bound=InterpArgs)
+class Interpolator(Generic[K, V], ABC):
     @abstractmethod
-    def interp(self, data: Mapping[Any, Any], point: GeographicPoint) -> np.float64 | float:
+    def query_params(self) -> Mapping[K, V]:
+        """
+        Returns
+        -------
+        A dictionary mapping from used queries to the parameters that should be used for that query
+        """
+
+    @abstractmethod
+    def interp(
+            self,
+            data: dict[K, Dataset[along_track_fields, Any]|None],
+            point: InterpQueryPoint
+            ) -> float:
         """
         Interpolate to point, given SLA data
         """
 
 
-class NearestNeighborInterpolator(Interpolator):
-    """
-    Base class for interpolation methods that use nearest neighbor(s)
-    """
 
-    def interp(self, data, point):
-        return data["sla_filtered"][0]
-
-
-class GeographicWindowInterpolator(Interpolator, ABC):
-    """
-    Abstract base class for interpolation methods that use windows of geographic
-    (lat/lon) points within some great circle distance.
-    """
-
-
-class ProjectedWindowInterpolator(Interpolator, ABC):
-    """
-    Abstract base class for interpolation methods that use windows of projected
-    points (transverse Mercator by default).
-    """
-
-    @abstractmethod
-    def interp(
-        self, data: Mapping[Any, Any], point: GeographicPoint
-    ) -> np.float64 | float:
-        raise NotImplementedError
-
-
-class GeographicGaussianKernelInterpolator(GeographicWindowInterpolator):
-    def __init__(self, length_scale: float):
+class GeographicGaussianKernelInterpolator(Interpolator[Literal['geographic_window'], GeographicWindowArgs]):
+    def __init__(
+            self,
+            length_scale: float,
+            radius: float = 500_000.0,
+            time_window: timedelta = timedelta(days=10)
+            ):
         """
         Interpolation method using a gaussian spreading kernel
 
+        Arguments
+        ---------
         length_scale: spreading distance, in meters
-        earth_radius: Earth's radius, in meters
+        radius: maximum distance from interp point to query point
+        time_window: maximum time difference (+ or -) from interp point to query point
         """
 
         self.length_scale = length_scale
-        self.needs_distance = True
+        self.radius = radius
+        self.time_window = time_window
+
+    def query_params(self):
+        args : Mapping[Literal["geographic_window"], GeographicWindowArgs] = {
+            "geographic_window": {
+                "fields": ["sla_filtered", "distance"],
+                "missions": ["al"],
+                "radius": self.radius,
+                "time_window": self.time_window,
+            }
+        }
+        return args
+
 
     def interp(self, data, point):
+        data = data["geographic_window"]
+        if data is None:
+            print("No data found in range")
+            return 0
         r = data["distance"]
         weights = np.exp(-1 / 2 * (r / self.length_scale) ** 2)
         weights /= weights.sum()  # normalize
         return np.dot(data["sla_filtered"], weights)
 
 
-class ProjectedGaussianKernelInterpolator(ProjectedWindowInterpolator):
-    def __init__(self, length_scale: float):
+class ProjectedGaussianKernelInterpolator(Interpolator[Literal['geographic_window'], GeographicWindowArgs]):
+    def __init__(
+            self,
+            length_scale: float,
+            radius: float = 500_000.0,
+            time_window: timedelta = timedelta(days=10)
+            ):
         """
         Interpolation method using a gaussian spreading kernel
 
+        Arguments
+        ---------
         length_scale: spreading distance, in meters
-        earth_radius: Earth's radius, in meters
+        radius: maximum distance from interp point to query point
+        time_window: maximum time difference (+ or -) from interp point to query point
         """
 
         self.length_scale = length_scale
-        self.needs_distance = True
+        self.radius = radius
+        self.time_window = time_window
+
+    def query_params(self):
+        args : Mapping[Literal["geographic_window"], GeographicWindowArgs] = {
+            "geographic_window": {
+                "fields": ["latitude", "longitude", "sla_filtered"],
+                "missions": ["al"],
+                "radius": self.radius,
+                "time_window": self.time_window,
+            }
+        }
+        return args
+
 
     def interp(self, data, point):
+        data = data["geographic_window"]
+        if data is None:
+            print("No data found in range")
+            return 0
         x, y = latitude_longitude_to_spherical_transverse_mercator(
-            data["latitude"], data["longitude"], point.longitude
+            data["latitude"], data["longitude"], point.lon
         )
         x0, y0 = latitude_longitude_to_spherical_transverse_mercator(
-            point.latitude, point.longitude, point.longitude
+            point.lat, point.lon, point.lon
         )
         x2 = (x - x0) ** 2 + (y - y0) ** 2
         weights = np.exp(-1 / 2 * x2 / self.length_scale**2)
@@ -110,30 +143,49 @@ class ProjectedGaussianKernelInterpolator(ProjectedWindowInterpolator):
         return np.dot(data["sla_filtered"], weights)
 
 
+class NearestNeighborInterpolator(Interpolator[Literal['nearest_neighbor'], NearestNeighborInterpArgs]):
+    def __init__(
+            self,
+            time_window: timedelta = timedelta(days=10)
+            ):
+        """
+        Interpolation method using a gaussian spreading kernel
+
+        Arguments
+        ---------
+        length_scale: spreading distance, in meters
+        radius: maximum distance from interp point to query point
+        time_window: maximum time difference (+ or -) from interp point to query point
+        """
+
+        self.time_window = time_window
+
+    def query_params(self):
+        args : Mapping[Literal["nearest_neighbor"], NearestNeighborInterpArgs] = {
+            "nearest_neighbor": {
+                "fields": ["sla_filtered"],
+                "missions": ["al"],
+                "time_window": self.time_window,
+            }
+        }
+        return args
+
+
+    def interp(self, data, point):
+        data = data["nearest_neighbor"]
+        if data is None:
+            print("No data found in range")
+            return 0
+        return data["sla_filtered"][0]
+
+
+
+
 def interpolate_using_atdb(
     queryPoints: InterpQueryPoints,
-    interpolator: Interpolator,
+    interpolator: Interpolator[K, V],
     atdb: AlongTrack = AlongTrack(),
-    distances: float | npt.NDArray[np.float64] = 150000,
-    missions: list[str] | None = None,
 ) -> InterpolatedPoints:
-
-    def query_fields() -> list[Any]:
-        if isinstance(interpolator, NearestNeighborInterpolator):
-            return ["sla_filtered", "distance"]
-        if isinstance(interpolator, GeographicWindowInterpolator):
-            fields = ["sla_filtered"]
-            if getattr(interpolator, "needs_distance", False):
-                fields.append("distance")
-            return fields
-        if isinstance(interpolator, ProjectedWindowInterpolator):
-            return ["latitude", "longitude", "sla_filtered"]
-        raise ValueError("Unrecognized Interpolator type")
-
-    def point_distance(i: int) -> float:
-        if not isinstance(distances, np.ndarray):
-            return float(cast(Any, distances))
-        return float(distances.astype(float, copy=False).reshape(-1)[i])
 
     # initialize output array
     sla = np.empty_like(queryPoints.lat)
@@ -145,39 +197,29 @@ def interpolate_using_atdb(
     ocean_indices = (basin_mask > 0) & (basin_mask < 1000)
     sla_ocean = sla[ocean_indices]
     ocean_flat_indices = np.flatnonzero(ocean_indices.reshape(-1))
-    fields = query_fields()
-    query_missions = cast(Any, missions if missions is not None else atdb.all_missions)
-    time_window = timedelta(days=10)
+
+    query_params = interpolator.query_params()
+    query_methods = {
+        "nearest_neighbor": atdb.geographic_nearest_neighbors,
+        "geographic_window": atdb.geographic_point_in_r_dt,
+    }
+    data : dict[K, Dataset[along_track_fields, Any]|None]= {method: None for method in query_params.keys()}
+
 
     for i, flat_index in enumerate(ocean_flat_indices):
-        point = GeographicPoint.from_query_points(queryPoints, flat_index)
+        point = queryPoints[flat_index]
 
-        if isinstance(interpolator, NearestNeighborInterpolator):
-            data = atdb.geographic_nearest_neighbors(
-                fields=fields,
-                latitude=point.latitude,
-                longitude=point.longitude,
-                date=point.datetime,
-                time_window=time_window,
-                missions=query_missions,
+        # query data
+        for method, params in query_params.items():
+            data[method] = query_methods[method](
+                latitude = point.lat,
+                longitude = point.lon,
+                date = point.date,
+                **(params)
             )
-        elif isinstance(interpolator, GeographicWindowInterpolator | ProjectedWindowInterpolator):
-            data = atdb.geographic_point_in_r_dt(
-                fields=fields,
-                latitude=point.latitude,
-                longitude=point.longitude,
-                date=point.datetime,
-                radius=point_distance(flat_index),
-                time_window=time_window,
-                missions=query_missions,
-            )
-        else:
-            raise ValueError("Unrecognized Interpolator type")
 
-        if data is None:
-            sla_ocean[i] = np.nan
-        else:
-            sla_ocean[i] = interpolator.interp(data, point)
+        # do the interpolation
+        sla_ocean[i] = interpolator.interp(data, point)
 
     sla[ocean_indices] = sla_ocean
     sla_obj = InterpolatedPoints(sla, queryPoints)

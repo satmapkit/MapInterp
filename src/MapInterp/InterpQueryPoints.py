@@ -2,11 +2,20 @@ import numpy as np
 import numpy.typing as npt
 from typing import Any, Literal
 from datetime import datetime
+from dataclasses import dataclass
 
 from OceanDB.utils.projections import (
     spherical_transverse_mercator_to_latitude_longitude,
 )
 
+@dataclass
+class InterpQueryPoint:
+    x: float
+    y: float
+    lat: float
+    lon: float
+    date: datetime
+    projection: str
 
 class InterpQueryPoints:
     """
@@ -59,3 +68,13 @@ class InterpQueryPoints:
             "t": self.dates,
             "projection": self.projection,
         }
+
+    def __getitem__(self, i: int) -> InterpQueryPoint:
+        return InterpQueryPoint(
+                x=self.x.item(i),
+                y=self.y.item(i),
+                lat=self.lat.item(i),
+                lon=self.lon.item(i),
+                date=self.dates[i],
+                projection=self.projection,
+                )

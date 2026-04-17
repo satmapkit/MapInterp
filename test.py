@@ -12,10 +12,10 @@ from matplotlib import colors
 import matplotlib.pyplot as plt
 import time
 
-date = datetime(year=2013, month=12, day=31, hour=23)
+date = datetime(year=2013, month=5, day=21, hour=23)
 
 # choose lat/lon grid values
-resolution = 2.5
+resolution = 10
 lon_dim = np.arange(-180, 180 - resolution, resolution) + resolution / 2
 lat_dim = np.arange(-70, 70 - resolution, resolution) + resolution / 2
 grid = InterpGrid(lat_dim, lon_dim, date, 'equirectangular')
@@ -33,10 +33,12 @@ for interp, title in interpolators:
 
     # make a plot
 
-    norm = colors.Normalize(vmin=-0.5, vmax=0.5)
+    # norm = colors.Normalize(vmin=-0.5, vmax=0.5)
     plt.figure()
-    plt.pcolormesh(sla_obj.queryPoints.y, sla_obj.queryPoints.x, sla_obj.sla, cmap='RdBu_r', norm=norm)
+    # plt.pcolormesh(sla_obj.queryPoints.y, sla_obj.queryPoints.x, sla_obj.sla, cmap='RdBu_r', norm=norm)
+    plt.pcolormesh(sla_obj.queryPoints.y, sla_obj.queryPoints.x, sla_obj.sla, cmap='RdBu_r')
     plt.title(f'{title}, resolution={resolution} degrees, {str(date)}')
+    plt.colorbar()
     filename = "figs/output_" + ''.join(title.lower().strip().split(' '))
     plt.savefig(filename + ".png", dpi=400)
 
