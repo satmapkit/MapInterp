@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from datetime import timedelta, datetime
-from typing import Any, TypedDict, TypeVar, Literal, Mapping, Generic
+from datetime import timedelta
+from typing import Any, TypedDict, TypeVar, Literal, Mapping, Generic, cast
+import time
 
 from OceanDB.data_access.along_track import AlongTrack, along_track_fields, Mission
 from OceanDB.utils.projections import latitude_longitude_to_spherical_transverse_mercator
@@ -163,7 +164,7 @@ class NearestNeighborInterpolator(Interpolator[Literal['nearest_neighbor'], Near
     def query_params(self):
         args : Mapping[Literal["nearest_neighbor"], NearestNeighborInterpArgs] = {
             "nearest_neighbor": {
-                "fields": ["sla_filtered"],
+                "fields": ["sla_filtered", "mission"],
                 "missions": ["al"],
                 "time_window": self.time_window,
             }
@@ -193,30 +194,58 @@ def interpolate_using_atdb(
     sla[:] = np.nan
 
     # restrict to only ocean points
-    basin_mask = atdb.basin_mask(queryPoints.lat, queryPoints.lon)
+    basin_mask = atdb.basin_mask_lookup.lookup(queryPoints.lat, queryPoints.lon)
     ocean_indices = (basin_mask > 0) & (basin_mask < 1000)
     sla_ocean = sla[ocean_indices]
     ocean_flat_indices = np.flatnonzero(ocean_indices.reshape(-1))
 
     query_params = interpolator.query_params()
-    query_methods = {
-        "nearest_neighbor": atdb.geographic_nearest_neighbors,
-        "geographic_window": atdb.geographic_point_in_r_dt,
-    }
-    data : dict[K, Dataset[along_track_fields, Any]|None]= {method: None for method in query_params.keys()}
 
+    # query data in batch before interpolating each point
+    nearest_neighbor_all = None
+    if "nearest_neighbor" in query_params.keys():
+        # extract the parameters
+        nearest_neighbor_params = query_params["nearest_neighbor"]
+        ocean_points = [queryPoints[flat_index] for flat_index in ocean_flat_indices]
 
-    for i, flat_index in enumerate(ocean_flat_indices):
+        # fetch data
+        nearest_neighbor_all = atdb.geographic_nearest_neighbors_batch(
+            fields=nearest_neighbor_params["fields"],
+            latitudes=[point.lat for point in ocean_points],
+            longitudes=[point.lon for point in ocean_points],
+            dates=[point.date for point in ocean_points],
+            missions=nearest_neighbor_params["missions"],
+            time_window=nearest_neighbor_params["time_window"],
+        )
+
+    # query data in batch before interpolating each point
+    geographic_window_all = None
+    if "geographic_window" in query_params.keys():
+        # TODO: find a better fix for typecheck errors
+        q = cast(Mapping[Literal["geographic_window"], NearestNeighborInterpArgs], query_params)
+
+        # extract the parameters
+        geographic_window_params = q["geographic_window"]
+        ocean_points = [queryPoints[flat_index] for flat_index in ocean_flat_indices]
+
+        # fetch data
+        geographic_window_all = atdb.geographic_point_in_r_dt_batch(
+            fields=geographic_window_params["fields"],
+            latitudes=[point.lat for point in ocean_points],
+            longitudes=[point.lon for point in ocean_points],
+            dates=[point.date for point in ocean_points],
+            missions=geographic_window_params["missions"],
+            time_window=geographic_window_params["time_window"],
+        )
+
+    # interpolate using the batched query results
+    for (i, flat_index) in enumerate(ocean_flat_indices):
         point = queryPoints[flat_index]
-
-        # query data
-        for method, params in query_params.items():
-            data[method] = query_methods[method](
-                latitude = point.lat,
-                longitude = point.lon,
-                date = point.date,
-                **(params)
-            )
+        data : dict[K, Dataset[along_track_fields, Any]|None]= {method: None for method in query_params.keys()}
+        if nearest_neighbor_all is not None:
+            data["nearest_neighbor"] = next(nearest_neighbor_all)
+        if geographic_window_all is not None:
+            data["geographic_window"] = next(geographic_window_all)
 
         # do the interpolation
         sla_ocean[i] = interpolator.interp(data, point)
