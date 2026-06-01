@@ -234,6 +234,7 @@ def interpolate_using_atdb(
             latitudes=[point.lat for point in ocean_points],
             longitudes=[point.lon for point in ocean_points],
             dates=[point.date for point in ocean_points],
+            radius=geographic_window_params["radius"],
             missions=geographic_window_params["missions"],
             time_window=geographic_window_params["time_window"],
         )

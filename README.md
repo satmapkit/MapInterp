@@ -39,3 +39,13 @@ Run via
 python test.py
 ```
 Note that this test relies on the database being accessible with permissions in .env.
+
+## Compatibility checks
+This repository includes a small compatibility suite focused on OceanDB API drift.
+It verifies the OceanDB query methods and signatures that MapInterp depends on, and
+checks that the interpolators call the expected batch query interfaces.
+
+Run it with
+```sh
+make test
+```
