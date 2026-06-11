@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 from datetime import timedelta
-from typing import Any, TypedDict, TypeVar, Literal, Mapping, Generic, cast
+from typing import Any, TypedDict, TypeVar, Literal, Mapping, Generic, cast, get_args
 import time
 
 from OceanDB.data_access.along_track import AlongTrack, along_track_fields, Mission
@@ -51,7 +51,8 @@ class GeographicGaussianKernelInterpolator(Interpolator[Literal['geographic_wind
             self,
             length_scale: float,
             radius: float = 500_000.0,
-            time_window: timedelta = timedelta(days=10)
+            time_window: timedelta = timedelta(days=10),
+            missions: tuple[Mission,...] = get_args(Mission),
             ):
         """
         Interpolation method using a gaussian spreading kernel
@@ -66,12 +67,13 @@ class GeographicGaussianKernelInterpolator(Interpolator[Literal['geographic_wind
         self.length_scale = length_scale
         self.radius = radius
         self.time_window = time_window
+        self.missions = list(missions)
 
     def query_params(self):
         args : Mapping[Literal["geographic_window"], GeographicWindowArgs] = {
             "geographic_window": {
                 "fields": ["sla_filtered", "distance"],
-                "missions": ["al"],
+                "missions": self.missions,
                 "radius": self.radius,
                 "time_window": self.time_window,
             }
@@ -95,7 +97,8 @@ class ProjectedGaussianKernelInterpolator(Interpolator[Literal['geographic_windo
             self,
             length_scale: float,
             radius: float = 500_000.0,
-            time_window: timedelta = timedelta(days=10)
+            time_window: timedelta = timedelta(days=10),
+            missions: tuple[Mission,...] = get_args(Mission),
             ):
         """
         Interpolation method using a gaussian spreading kernel
@@ -110,12 +113,13 @@ class ProjectedGaussianKernelInterpolator(Interpolator[Literal['geographic_windo
         self.length_scale = length_scale
         self.radius = radius
         self.time_window = time_window
+        self.missions = list(missions)
 
     def query_params(self):
         args : Mapping[Literal["geographic_window"], GeographicWindowArgs] = {
             "geographic_window": {
                 "fields": ["latitude", "longitude", "sla_filtered"],
-                "missions": ["al"],
+                "missions": self.missions,
                 "radius": self.radius,
                 "time_window": self.time_window,
             }
@@ -147,7 +151,8 @@ class ProjectedGaussianKernelInterpolator(Interpolator[Literal['geographic_windo
 class NearestNeighborInterpolator(Interpolator[Literal['nearest_neighbor'], NearestNeighborInterpArgs]):
     def __init__(
             self,
-            time_window: timedelta = timedelta(days=10)
+            time_window: timedelta = timedelta(days=10),
+            missions: tuple[Mission,...] = get_args(Mission),
             ):
         """
         Interpolation method using a gaussian spreading kernel
@@ -160,12 +165,13 @@ class NearestNeighborInterpolator(Interpolator[Literal['nearest_neighbor'], Near
         """
 
         self.time_window = time_window
+        self.missions = missions
 
     def query_params(self):
         args : Mapping[Literal["nearest_neighbor"], NearestNeighborInterpArgs] = {
             "nearest_neighbor": {
                 "fields": ["sla_filtered", "mission"],
-                "missions": ["al"],
+                "missions": list(self.missions),
                 "time_window": self.time_window,
             }
         }
