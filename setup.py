@@ -14,5 +14,6 @@ setup(
         f"OceanDB @ {OCEANDB.as_uri()}",
         "xarray~=2024.6.0",
         "matplotlib>=3.0",
+        "cartopy>=0.25",
     ],
 )
